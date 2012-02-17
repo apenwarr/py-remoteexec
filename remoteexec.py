@@ -11,13 +11,14 @@ def _load(verbose):
     log = lambda _: None
   log('Assembler started')
   files = {}
+  decomp = zlib.decompressobj()
   while True:
     name = sys.stdin.readline().strip()
     if not name:
       break
     log('Reading module ' + name)
     n = int(sys.stdin.readline())
-    files[name] = zlib.decompress(sys.stdin.read(n))
+    files[name] = decomp.decompress(sys.stdin.read(n))
     log('Read module %s (%d compressed, %d decompressed)'
         % (name, n, len(files[name])))
   log('Finished reading modules, starting compilation')
@@ -44,7 +45,10 @@ def _load(verbose):
   sys.stdout.flush()
   sys.stderr.flush()
   module, func = sys.stdin.readline().strip().rsplit('.', 2)
-  log('All code loaded, handing off to %s.%s()' % (module, func))
+  log('All code loaded, sending sync string')
+  sys.stdout.write('\0REINDEERFLOTILLA0101')
+  sys.stdout.flush()
+  log('Sync sent, handing off to %s.%s()' % (module, func))
   sys.modules[module].__dict__[func]()
 # END ASSEMBLER
 # The above is the stage2 assembler that gets run on the remote
@@ -62,6 +66,7 @@ _STAGE1 = '''
 import sys;
 exec compile(sys.stdin.read(%d), "assembler.py", "exec")
 '''
+_SYNC_STRING = 'REINDEERFLOTILLA0101'
 
 def _readfile(filename):
   f = open(filename)
@@ -72,13 +77,16 @@ def _readfile(filename):
 
 def _pack(filenames, literal_modules, main_func):
   out = []
+  compress = zlib.compressobj(9)
   for filename in filenames:
     _, basename = os.path.split(filename)
     assert basename[-3:] == '.py'
-    source = zlib.compress(_readfile(filename))
+    source = compress.compress(_readfile(filename))
+    source += compress.flush(zlib.Z_SYNC_FLUSH)
     out.append('%s\n%d\n%s' % (basename[:-3], len(source), source))
   for name, source in literal_modules.iteritems():
-    source = zlib.compress(source)
+    source = compress.compress(source)
+    source += compress.flush(zlib.Z_SYNC_FLUSH)
     out.append('%s\n%d\n%s' % (name, len(source), source))
   out.append('\n%s\n' % main_func)
   return ''.join(out)
@@ -91,10 +99,23 @@ def _get_assembler(verbose=False):
   assembler = source.split('# END ASSEMBLER\n')[0]
   return '%s\n_load(%s)\n' % (assembler, verbose)
 
-# Sync string, exception if sync string not seen
-# Assembler at start of file
-# Use a single compressobj
 # style guide
+
+class Fatal(Exception):
+  pass
+
+def _sync(p, s):
+  z = 'x'
+  while z and z != '\0':
+    z = s.recv(1)
+  sync = s.recv(len(_SYNC_STRING))
+
+  ret = p.poll()
+  if ret:
+    raise Fatal('server died with error code %d' % ret)
+
+  if sync != _SYNC_STRING:
+    raise Fatal('expected sync string %s, got %s' % (_SYNC_STRING, sync))
 
 def remote_exec(hostname=None, user=None, port=22,
                 ssh_cmd=None, module_filenames=None,
@@ -121,8 +142,15 @@ def remote_exec(hostname=None, user=None, port=22,
   def setup():
     s2.close()
   p = subprocess.Popen(cmd, stdin=sla, stdout=slb, preexec_fn=setup, close_fds=True)
-  os.close(sla)
-  os.close(slb)
-  s2.sendall(stage2)
-  s2.sendall(main)
-  return p, s2
+  try:
+    os.close(sla)
+    os.close(slb)
+    s2.sendall(stage2)
+    s2.sendall(main)
+    _sync(p, s2)
+    return p, s2
+  except:
+    if not p.poll():
+      os.kill(p.pid, 9)
+      p.wait()
+    raise
