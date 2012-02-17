@@ -23,7 +23,11 @@ def hostname():
 
 if __name__ == '__main__':
   import remoteexec
-  remoteexec.remote_exec(hostname=sys.argv[1],
-                         module_filenames=['test.py', 'remoteexec.py'],
-                         literal_modules=mods,
-                         main_func='test1.print_stuff')
+  p, s = remoteexec.remote_exec(
+      hostname=sys.argv[1],
+      module_filenames=['test.py', 'remoteexec.py'],
+      literal_modules=mods,
+      main_func='test1.print_stuff')
+  f = s.makefile('r')
+  s.close()
+  print f.read()
