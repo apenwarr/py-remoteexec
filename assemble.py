@@ -1,8 +1,3 @@
-import sys
-
-print "STARTED"
-sys.stdout.flush()
-
 def _load():
   import imp
   import zlib
