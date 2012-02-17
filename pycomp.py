@@ -21,20 +21,26 @@ def _pack(filenames, literal_modules, main_func):
     assert basename[-3:] == '.py'
     source = zlib.compress(_readfile(filename))
     out.append('%s\n%d\n%s' % (basename[:-3], len(source), source))
-  for name, source in literal_modules:
+  for name, source in literal_modules.iteritems():
     source = zlib.compress(source)
     out.append('%s\n%d\n%s' % (name, len(source), source))
   out.append('\n%s\n' % main_func)
   return ''.join(out)
 
 def _get_assembler():
-  source = _readfile(__file__)
-  assembler = source.split('# ' + 'BEGIN ASSEMBLER\n')[1]
-  assembler = assembler.split('# ' + 'END ASSEMBLER\n')[0]
+  filename = __file__
+  if filename.endswith('.pyc'):
+    filename = filename[:-1]
+  source = _readfile(filename)
+  assembler = source.split('# BEGIN ASSEMBLER\n')[1]
+  assembler = assembler.split('# END ASSEMBLER\n')[0]
   return assembler + '_load()\n'
 
 # BEGIN ASSEMBLER
 def _load():
+  def __log(s):
+    print s
+    sys.stdout.flush()
   import imp
   import zlib
   import sys
@@ -46,6 +52,7 @@ def _load():
     n = int(sys.stdin.readline())
     files[name] = zlib.decompress(sys.stdin.read(n))
   while files:
+    l = len(files)
     for name in list(files.keys()):
       code = compile(files[name], name, 'exec')
       d = {}
@@ -57,6 +64,10 @@ def _load():
       mod.__dict__.update(d)
       sys.modules[name] = mod
       del files[name]
+    if len(files) == l:
+      print 'Infinite compile loop'
+      sys.stdout.flush()
+      exit(1)
   del sys.modules[__name__].__dict__['_load']
   sys.stdout.flush()
   sys.stderr.flush()
@@ -97,7 +108,3 @@ def remote_exec(hostname=None, user=None, port=22,
   s2.sendall(stage2)
   s2.sendall(main)
   p.wait()
-
-remote_exec(hostname='localhost',
-            module_filenames=['lol.py', 'test.py'],
-            main_func='test.hello')
