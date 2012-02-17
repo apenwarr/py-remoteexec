@@ -3,22 +3,44 @@
 import subprocess
 import socket
 import os
+import os.path
+import zlib
+import textwrap
 
-def pack(modules, main):
+def _readfile(filename):
+  f = open(filename)
+  try:
+    return f.read()
+  finally:
+    f.close()
+
+def _pack(filenames, literal_modules):
   out = []
-  for m in modules:
-    with open(m) as f:
-      content = f.read()
-    out.append('%s\n%d\n%s' % (m[:-3], len(content), content))
-  out.append('\n')
-
+  for filename in filenames:
+    _, basename = os.path.split(filename)
+    assert basename[:-3] == '.py'
+    source = zlib.compress(_readfile(filename))
+    out.append('%s\n%d\n%s' % (basename[:-3], len(source), source))
+  for name, source in literal_modules:
+    source = zlib.compress(source)
+    out.append('%s\n%d\n%s' % (name, len(source), source))
   return ''.join(out)
 
-def run(host, modules):
-  stage3 = pack(modules, None)
-  stage2 = open('assemble.py').read()
-  stage1 = r'''import sys; exec compile(sys.stdin.read(%d), "assembler.py", "exec");
-            ''' % len(stage2)
+def remote_exec(hostname=None, username=None, port=22,
+                ssh_cmd=None, module_filenames=None,
+                literal_modules=None):
+  if not ssh_cmd:
+    if user:
+      user = user + '@'
+    else:
+      user = ''
+    ssh_cmd = ['ssh', '-p', str(port), '%s%s' % (user, hostname)]
+  main = _pack(module_filenames or [], literal_modules or {})
+  stage2 = _readfile('assemble.py')
+  stage1 = textwrap.dedent(r'''
+      import sys;
+      exec compile(sys.stdin.read(%d), "assembler.py", "exec")
+      ''') % len(stage2)
   pycmd = ("P=python2; $P -V 2>/dev/null || P=python; "
            "exec \"$P\" -c '%s'") % stage1
   cmd = ['ssh', host, '--', pycmd]
@@ -36,4 +58,6 @@ def run(host, modules):
   s2.sendall(stage3)
   p.wait()
 
-run('localhost', ['lol.py', 'test.py'])
+run('atlas', ['lol.py', 'test.py'])
+
+
