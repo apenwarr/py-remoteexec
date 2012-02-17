@@ -22,8 +22,8 @@ def hostname():
   print socket.gethostname()
 
 if __name__ == '__main__':
-  import pycomp
-  pycomp.remote_exec(hostname=sys.argv[1],
-                     module_filenames=['test.py', 'pycomp.py'],
-                     literal_modules=mods,
-                     main_func='test1.print_stuff')
+  import remoteexec
+  remoteexec.remote_exec(hostname=sys.argv[1],
+                         module_filenames=['test.py', 'remoteexec.py'],
+                         literal_modules=mods,
+                         main_func='test1.print_stuff')
