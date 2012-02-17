@@ -27,7 +27,8 @@ if __name__ == '__main__':
       hostname=sys.argv[1],
       module_filenames=['test.py', 'remoteexec.py'],
       literal_modules=mods,
-      main_func='test1.print_stuff')
+      main_func='test1.print_stuff',
+      verbose_load=True)
   f = s.makefile('r')
   s.close()
   print f.read()

@@ -1,42 +1,3 @@
-#!/usr/bin/env python
-
-import subprocess
-import socket
-import os
-import os.path
-import zlib
-import textwrap
-
-def _readfile(filename):
-  f = open(filename)
-  try:
-    return f.read()
-  finally:
-    f.close()
-
-def _pack(filenames, literal_modules, main_func):
-  out = []
-  for filename in filenames:
-    _, basename = os.path.split(filename)
-    assert basename[-3:] == '.py'
-    source = zlib.compress(_readfile(filename))
-    out.append('%s\n%d\n%s' % (basename[:-3], len(source), source))
-  for name, source in literal_modules.iteritems():
-    source = zlib.compress(source)
-    out.append('%s\n%d\n%s' % (name, len(source), source))
-  out.append('\n%s\n' % main_func)
-  return ''.join(out)
-
-def _get_assembler(verbose=False):
-  filename = __file__
-  if filename.endswith('.pyc'):
-    filename = filename[:-1]
-  source = _readfile(filename)
-  assembler = source.split('# BEGIN ASSEMBLER\n')[1]
-  assembler = assembler.split('# END ASSEMBLER\n')[0]
-  return '%s\n_load(%s)\n' % (assembler, verbose)
-
-# BEGIN ASSEMBLER
 def _load(verbose):
   import imp
   import sys
@@ -54,7 +15,7 @@ def _load(verbose):
     name = sys.stdin.readline().strip()
     if not name:
       break
-    log('Reading python module ' + name)
+    log('Reading module ' + name)
     n = int(sys.stdin.readline())
     files[name] = zlib.decompress(sys.stdin.read(n))
     log('Read module %s (%d compressed, %d decompressed)'
@@ -86,8 +47,50 @@ def _load(verbose):
   log('All code loaded, handing off to %s.%s()' % (module, func))
   sys.modules[module].__dict__[func]()
 # END ASSEMBLER
+# The above is the stage2 assembler that gets run on the remote
+# system. To ensure that syntax errors and exceptions have useful line
+# numbers, keep it at the top of the file.
 
-# Remove textwrap use
+import os
+import os.path
+import socket
+import subprocess
+import zlib
+
+# Stage 1 assembler, compiles and executes stage2.
+_STAGE1 = '''
+import sys;
+exec compile(sys.stdin.read(%d), "assembler.py", "exec")
+'''
+
+def _readfile(filename):
+  f = open(filename)
+  try:
+    return f.read()
+  finally:
+    f.close()
+
+def _pack(filenames, literal_modules, main_func):
+  out = []
+  for filename in filenames:
+    _, basename = os.path.split(filename)
+    assert basename[-3:] == '.py'
+    source = zlib.compress(_readfile(filename))
+    out.append('%s\n%d\n%s' % (basename[:-3], len(source), source))
+  for name, source in literal_modules.iteritems():
+    source = zlib.compress(source)
+    out.append('%s\n%d\n%s' % (name, len(source), source))
+  out.append('\n%s\n' % main_func)
+  return ''.join(out)
+
+def _get_assembler(verbose=False):
+  filename = __file__
+  if filename.endswith('.pyc'):
+    filename = filename[:-1]
+  source = _readfile(filename)
+  assembler = source.split('# END ASSEMBLER\n')[0]
+  return '%s\n_load(%s)\n' % (assembler, verbose)
+
 # Sync string, exception if sync string not seen
 # Assembler at start of file
 # Use a single compressobj
@@ -107,10 +110,7 @@ def remote_exec(hostname=None, user=None, port=22,
                literal_modules or {},
                main_func or 'main.main')
   stage2 = _get_assembler(verbose_load)
-  stage1 = textwrap.dedent(r'''
-      import sys;
-      exec compile(sys.stdin.read(%d), "assembler.py", "exec")
-      ''') % len(stage2)
+  stage1 = _STAGE1 % len(stage2)
   pycmd = ("P=python2; $P -V 2>/dev/null || P=python; "
            "exec \"$P\" -c '%s'") % stage1
   cmd = ssh_cmd + ['--', pycmd]
