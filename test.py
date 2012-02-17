@@ -19,16 +19,16 @@ mods = {
     }
 
 def hostname():
-  print socket.gethostname()
+    print socket.gethostname()
 
 if __name__ == '__main__':
-  import remoteexec
-  p, s = remoteexec.remote_exec(
-      hostname=sys.argv[1],
-      module_filenames=['test.py', 'remoteexec.py'],
-      literal_modules=mods,
-      main_func='test1.print_stuff',
-      verbose_load=True)
-  f = s.makefile('r')
-  s.close()
-  print f.read()
+    import remoteexec
+    p, s = remoteexec.remote_exec(
+        hostname=sys.argv[1],
+        module_filenames=['test.py', 'remoteexec.py'],
+        literal_modules=mods,
+        main_func='test1.print_stuff',
+        verbose_load=True)
+    f = s.makefile('r')
+    s.close()
+    print f.read()
